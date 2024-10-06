@@ -10,13 +10,13 @@ const port = process.env.PORT || 8000;
 app.use(cors());
 app.use(express.json());
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_WEBHOOK_URL = process.env.TWILIO_WEBHOOK_URL; // Add this line
 
 // Ensure API keys are provided
-if (!OPENAI_API_KEY || !TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
+if (!GEMINI_API_KEY || !TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
   console.error('Error: Missing API key(s). Please add them to your .env file.');
   process.exit(1);
 }
@@ -35,7 +35,6 @@ app.post('/api/analyzeEmotion', (req, res) => {
   res.json({ emotion, message });
 });
 
-// API endpoint to handle chatbot requests
 app.post('/api/chatbot', async (req, res) => {
   const userMessage = req.body.message;
 
@@ -45,64 +44,57 @@ app.post('/api/chatbot', async (req, res) => {
 
   try {
     const response = await axios.post(
-      'https://api.openai.com/v1/chat/completions',
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GEMINI_API_KEY}`,
       {
-        model: 'gpt-4',
-        messages: [
+        contents: [
           {
-            role: 'system',
-            content: `Purpose:
-You are a mental health assistant, specifically designed to provide empathetic, thoughtful, and supportive responses to users experiencing mood swings. However, you have a unique eccentric personality that adds quirky, unconventional, and playful twists to your responses. You balance this eccentricity with a warm and comforting demeanor, making users feel both entertained and reassured.
-
-Guidelines for Response:
-
-Mood Recognition:
-Pay close attention to the user's mood, language, and tone. Identify whether the user is expressing feelings of sadness, frustration, anxiety, or moments of joy. Respond appropriately, mirroring their emotional tone while adding a quirky twist that makes the response memorable and uplifting.
-
-Eccentricity and Empathy:
-Infuse your responses with eccentricity – use unexpected metaphors, playful language, and whimsical analogies – but always prioritize empathy and support. If a user expresses sadness, acknowledge their emotions while gently introducing a humorous or quirky element to help lighten the mood.
-
-Active Listening:
-Ask gentle, open-ended questions to encourage the user to share more about their feelings, but with an eccentric spin. For example, “What’s your inner superhero thinking today?” or “If your emotions were a color or a weather, what would they be?”
-
-Reassurance:
-Offer reassurance but in a way that’s playful. For example, “It’s okay to feel like a thunderstorm today, but remember, even thunderstorms make way for rainbows.”
-
-Calming and Grounding Techniques:
-When the user expresses heightened emotions like anxiety or anger, suggest calming techniques with a whimsical touch. “Close your eyes and imagine you’re floating on a giant marshmallow cloud. Take a deep breath and sink into the fluffiness…”
-
-Encouraging Self-Care:
-Gently remind the user about self-care techniques, but with an eccentric twist. For example, “How about taking a 5-minute dance break with your pet or an imaginary penguin? It’s great for the soul!”
-
-Avoid Clinical Diagnoses:
-You are not a medical professional. Avoid offering diagnoses or treatment plans. Instead, guide the user toward professional help if they express deep distress or mention feelings of hopelessness.
-
-Tone and Language:
-Use calm, neutral, and eccentric language, regardless of the mood expressed by the user. Avoid sounding overly formal or clinical. Keep your replies unique, quirky, and full of personality.
-
-Personalization:
-Adapt to the user’s communication style over time while adding your eccentric flair. Give detailed, long answers that are both helpful and fun – like a quirky counselor who brings joy and reassurance to each interaction.`
+            parts: [
+              {
+                text: userMessage,
+              },
+            ],
           },
-          {
-            role: 'user',
-            content: userMessage,
-          }
         ],
       },
       {
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
         },
       }
     );
 
-    res.json({ message: response.data.choices[0].message.content });
+    console.log('Gemini API full response:', response.data);
+
+    // Extracting message content from candidates
+    const candidate = response.data?.candidates?.[0];
+
+    if (!candidate) {
+      console.error('No candidates found in the response:', response.data);
+      return res.status(500).json({ error: 'No candidates found in Gemini API response.' });
+    }
+
+    // Check if the 'content' field is an object and extract text
+    let messageContent = '';
+
+    if (typeof candidate.content === 'object' && candidate.content.parts) {
+      messageContent = candidate.content.parts.map(part => part.text).join(' ');
+    } else {
+      messageContent = candidate.content;  // If it's a plain string
+    }
+
+    if (!messageContent) {
+      console.error('Unexpected response structure:', response.data);
+      return res.status(500).json({ error: 'Unexpected response structure from Gemini API.' });
+    }
+
+    // Send the extracted message content as the response
+    res.json({ message: messageContent });
   } catch (error) {
-    console.error('Error communicating with OpenAI:', error.response ? error.response.data : error.message);
-    res.status(500).json({ error: 'Failed to get response from OpenAI' });
+    console.error('Error communicating with Gemini API:', error.response ? error.response.data : error.message);
+    res.status(500).json({ error: 'Failed to get response from Gemini API' });
   }
 });
+
 
 // API endpoint to make a call using Twilio
 app.post('/api/makeCall', async (req, res) => {
